@@ -28,7 +28,7 @@
 
 //! This module handles the actual Tiled map loading.
 
-use std::io::{Cursor, Error as IoError, ErrorKind, Read};
+use std::io::{Cursor, ErrorKind};
 use std::path::Path;
 use std::sync::Arc;
 
@@ -94,35 +94,28 @@ pub struct TiledMap {
     pub tile_image_offsets: HashMap<(usize, tiled::TileId), u32>,
 }
 
-struct BytesResourceReader<'a, 'b> {
+struct BytesResourceReader {
     bytes: Arc<[u8]>,
-    context: &'a mut LoadContext<'b>,
 }
-impl<'a, 'b> BytesResourceReader<'a, 'b> {
-    fn new(bytes: &'a [u8], context: &'a mut LoadContext<'b>) -> Self {
+
+impl BytesResourceReader {
+    fn new(bytes: &[u8]) -> Self {
         Self {
             bytes: Arc::from(bytes),
-            context,
         }
     }
 }
 
-impl<'a, 'b> tiled::ResourceReader for BytesResourceReader<'a, 'b> {
-    type Resource = Box<dyn Read + 'a>;
-    type Error = IoError;
+impl tiled::ResourceReader for BytesResourceReader {
+    type Resource = Cursor<Arc<[u8]>>;
+    type Error = std::io::Error;
 
-    fn read_from(&mut self, path: &Path) -> std::result::Result<Self::Resource, Self::Error> {
-        if let Some(extension) = path.extension() {
-            if extension == "tsx" {
-                let future = self.context.read_asset_bytes(path.to_path_buf());
-                let data = futures_lite::future::block_on(future)
-                    .map_err(|err| IoError::new(ErrorKind::NotFound, err))?;
-                return Ok(Box::new(Cursor::new(data)));
-            }
-        }
-        Ok(Box::new(Cursor::new(self.bytes.clone())))
+    fn read_from(&mut self, _path: &Path) -> std::result::Result<Self::Resource, Self::Error> {
+        // In this case, the path is ignored because the byte data is already provided.
+        Ok(Cursor::new(self.bytes.clone()))
     }
 }
+
 
 struct TiledLoader;
 
@@ -154,7 +147,8 @@ impl AssetLoader for TiledLoader {
             // Allow the loader to also load tileset images.
             let mut loader = tiled::Loader::with_cache_and_reader(
                 tiled::DefaultResourceCache::new(),
-                BytesResourceReader::new(&bytes, load_context),
+                // BytesResourceReader::new(&bytes, load_context),
+                BytesResourceReader::new(&bytes),
             );
             // Load the map and all tiles.
             loader.load_tmx_map(&map_path).map_err(|e| {
